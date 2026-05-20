@@ -270,12 +270,16 @@ def main():
             move(Z=Z_PICK_HOVER, F=FEED_PICK)
             dwell(0.3)
 
+            print("[PICK] GRIPPER ON …")
+            gripper_open()
+            dwell(0.5)
+
             print("[PICK] Turun pick …")
             move(Z=Z_PICK_DOWN, F=FEED_PICK)
             dwell(0.5)
 
-            print("[PICK] Vacuum ON …")
-            gripper_open()
+            print("[PICK] !!!!!!!GRIP!!!!!!!!!!")
+            gripper_close()
             dwell(0.5)
 
             print("[PICK] Naik …")
