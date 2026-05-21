@@ -117,21 +117,21 @@ def home():
     pos.update({"X": X_HOME, "Y": Y_HOME, "Z": Z_SEARCH, "E": E_MIN})
 
 def gripper_open():
-    send("G160")            # VACUM ON  (sesuai command list)
+    send("G160")            # GRIP BUKA
 
 def gripper_close():
-    send("G130")            # VACUM OFF
+    send("G130")            # GRIP TUTUP
 
 # ═══════════════════════════════════════════════════════════════════
 #  MOUSE CALLBACK – set ulang crosshair tengah
 # ═══════════════════════════════════════════════════════════════════
-# def on_mouse(event, x, y, flags, param):
-#     global CENTER_X_MARK, CENTER_Y_MARK          # type: ignore[name-defined]
-#     if event == cv2.EVENT_LBUTTONDOWN:
-#         import vision_robobio as v
-#         v.CENTER_X_MARK = x
-#         v.CENTER_Y_MARK = y
-#         print(f"[CALIB] Crosshair diset ke ({x}, {y})")
+def on_mouse(event, x, y, flags, param):
+    global CENTER_X_MARK, CENTER_Y_MARK          # type: ignore[name-defined]
+    if event == cv2.EVENT_LBUTTONDOWN:
+        import vision_robobio as v
+        v.CENTER_X_MARK = x
+        v.CENTER_Y_MARK = y
+        print(f"[CALIB] Crosshair diset ke ({x}, {y})")
 
 # ═══════════════════════════════════════════════════════════════════
 #  UTILITAS HUD
@@ -177,7 +177,7 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
     cv2.namedWindow("Vision")
-    # cv2.setMouseCallback("Vision", on_mouse)
+    cv2.setMouseCallback("Vision", on_mouse)
 
     state      = STATE_IDLE
     e_current  = E_MIN          # posisi E saat sweep
@@ -191,20 +191,37 @@ def main():
             print("[ERROR] Kamera tidak terbaca.")
             break
 
-        # ── Deteksi objek ──────────────────────────────────────────
-        cx, cy, contour_w, frame_masked = detection(frame)
-        dx, dy = (0.0, 0.0)
-        if cx != -1:
-            dx, dy = pixel_to_mm(cx, cy)
+        # ── KEYBOARD (cek dulu sebelum apapun) ────────────────────
+        key = cv2.waitKey(1) & 0xFF
 
-        object_detected = (cx != -1)
+        if key == ord('q'):
+            print("[EXIT] Keluar …")
+            break
+
+        elif key == ord('s'):
+            if state in (STATE_IDLE, STATE_DONE):
+                print("[START] Mulai scan …")
+                e_current = E_MIN
+                y_current = Y_HOME
+                move(X=X_HOME, Y=Y_HOME, Z=Z_SEARCH, E=E_MIN, F=FEED_SEARCH)
+                time.sleep(0.5)
+                state = STATE_SCAN_E
+
+        # ── Deteksi objek ──────────────────────────────────────────
+        # cx, cy, contour_w, frame_masked = detection(frame)
+        get_detection = detection(frame)
+        dx, dy = (0.0, 0.0)
+        if get_detection[0] != -1:
+            dx, dy = pixel_to_mm(get_detection[0], get_detection[1])
+
+        object_detected = (get_detection[0] != -1)
         object_centered = (
             object_detected
-            and abs(cx - CENTER_X_MARK) <= CENTER_TOLERANCE
-            and abs(cy - CENTER_Y_MARK) <= CENTER_TOLERANCE
+            and abs(get_detection[0] - CENTER_X_MARK) <= CENTER_TOLERANCE
+            and abs(get_detection[1] - CENTER_Y_MARK) <= CENTER_TOLERANCE
         )
         object_big_enough = (
-            object_detected and contour_w != -1 and contour_w >= MIN_AREA_PICK
+            object_detected and get_detection[2] != -1 and get_detection[2] >= MIN_AREA_PICK
         )
 
         # ── STATE MACHINE ──────────────────────────────────────────
@@ -214,7 +231,7 @@ def main():
         # ── SCAN_E: sweep E dari posisi saat ini hingga E_MAX ──────
         elif state == STATE_SCAN_E:
             if object_detected:
-                print(f"[SCAN_E] Objek terdeteksi di ({cx},{cy}). Beralih ke ALIGN.")
+                print(f"[SCAN_E] Objek terdeteksi di ({get_detection[0]},{get_detection[1]}). Beralih ke ALIGN.")
                 state = STATE_ALIGN
 
             elif e_current < E_MAX:
@@ -270,16 +287,12 @@ def main():
             move(Z=Z_PICK_HOVER, F=FEED_PICK)
             dwell(0.3)
 
-            print("[PICK] GRIPPER ON …")
-            gripper_open()
-            dwell(0.5)
-
             print("[PICK] Turun pick …")
             move(Z=Z_PICK_DOWN, F=FEED_PICK)
             dwell(0.5)
 
-            print("[PICK] !!!!!!!GRIP!!!!!!!!!!")
-            gripper_close()
+            print("[PICK] Vacuum ON …")
+            gripper_open()
             dwell(0.5)
 
             print("[PICK] Naik …")
@@ -297,27 +310,26 @@ def main():
             pass    # tunggu keypress [S] untuk reset
 
         # ── RENDER ─────────────────────────────────────────────────
-        frame = draw_overlay(frame, cx, cy)
-        frame = draw_hud(frame, state, cx, cy, dx, dy)
+        if get_detection[0] != -1:
+            dx, dy = pixel_to_mm(get_detection[0], get_detection[1])
+            cv2.rectangle(frame, (get_detection[4], get_detection[5]), (get_detection[6], get_detection[7]), (0, 255, 0), 2)
+            cv2.putText(frame, f"cx={get_detection[0]} cy={get_detection[1]}", (10, 25),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            cv2.putText(frame, f"dx={dx:.2f}mm dy={dy:.2f}mm", (10, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
+        else:
+            cv2.putText(frame, f"cx=0 cy=0", (10, 25),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            cv2.putText(frame, f"dx=0mm dy=0mm", (10, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
+        # cv2.rectangle(frame, (get_detection[4], get_detection[5]), (get_detection[6], get_detection[7]), (0, 255, 0), 2)
+        frame = draw_overlay(frame, get_detection[0], get_detection[1])
+        frame = draw_hud(frame, state, get_detection[0], get_detection[1], dx, dy)
 
         cv2.imshow("Vision", frame)
-        cv2.imshow("Masked", frame_masked)
+        # cv2.imshow("Masked", frame_masked)
 
-        # ── KEYBOARD ───────────────────────────────────────────────
-        key = cv2.waitKey(1) & 0xFF
 
-        if key == ord('q'):
-            print("[EXIT] Keluar …")
-            break
-
-        elif key == ord('s'):
-            if state in (STATE_IDLE, STATE_DONE):
-                print("[START] Mulai scan …")
-                e_current = E_MIN
-                y_current = Y_HOME
-                move(X=X_HOME, Y=Y_HOME, Z=Z_SEARCH, E=E_MIN, F=FEED_SEARCH)
-                time.sleep(0.5)
-                state = STATE_SCAN_E
 
     # ── CLEANUP ────────────────────────────────────────────────────
     cap.release()

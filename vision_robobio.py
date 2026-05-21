@@ -2,8 +2,8 @@ import numpy as np
 import cv2
 
 # ── DETECTION CONSTANTS ────────────────────────────────────────────
-CENTER_X_MARK      = 320
-CENTER_Y_MARK      = 240
+CENTER_X_MARK      = 347
+CENTER_Y_MARK      = 456
 MIN_AREA_DETECTION = 10300
 MIN_AREA_PICK      = 73000
 CENTER_TOLERANCE   = 25
@@ -20,6 +20,15 @@ HIGH_HSV_YELLOW2 = np.array([30, 206, 255])
 
 LOW_HSV_YELLOW3  = np.array([0, 58, 117])
 HIGH_HSV_YELLOW3 = np.array([66, 255, 255])
+
+LOW_HSV_YELLOW4  = np.array([0, 76, 28])
+HIGH_HSV_YELLOW4 = np.array([40, 187, 255])
+
+LOW_HSV_YELLOW5  = np.array([15, 31, 0])
+HIGH_HSV_YELLOW5 = np.array([53, 255, 250])
+
+LOW_HSV_YELLOW6  = np.array([17, 44, 0])
+HIGH_HSV_YELLOW6 = np.array([41, 255, 255])
 
 # ── GLOBALS ────────────────────────────────────────────────────────
 last_centroid    = None
@@ -58,7 +67,10 @@ def detection(frame):
     mask1 = cv2.inRange(hsv, LOW_HSV_YELLOW1, HIGH_HSV_YELLOW1)
     mask2 = cv2.inRange(hsv, LOW_HSV_YELLOW2, HIGH_HSV_YELLOW2)
     mask3 = cv2.inRange(hsv, LOW_HSV_YELLOW3, HIGH_HSV_YELLOW3)
-    mask  = cv2.bitwise_or(cv2.bitwise_or(mask1, mask2), mask3)
+    mask4 = cv2.inRange(hsv, LOW_HSV_YELLOW4, HIGH_HSV_YELLOW4)
+    mask5 = cv2.inRange(hsv, LOW_HSV_YELLOW5, HIGH_HSV_YELLOW5)
+    mask6 = cv2.inRange(hsv, LOW_HSV_YELLOW6, HIGH_HSV_YELLOW6)
+    mask  = cv2.bitwise_or(cv2.bitwise_or(cv2.bitwise_or(cv2.bitwise_or(cv2.bitwise_or(mask1, mask2), mask3), mask4), mask5), mask6)
 
     kernel  = np.ones((3, 3), np.uint8)
     opening = cv2.morphologyEx(mask,    cv2.MORPH_OPEN,  np.ones((3, 3), np.uint8))
@@ -71,25 +83,32 @@ def detection(frame):
     cx_target           = -1
     cy_target           = -1
     contour_width_target = -1
+    x = -1
+    y = -1
+    w = -1
+    h = -1
 
     for cnt in contours:
         area = cv2.contourArea(cnt)
         if area > MIN_AREA_DETECTION:
+            x, y, w, h  = cv2.boundingRect(cnt)
+            contour_width = max(x+w, y+h)
             M  = cv2.moments(cnt)
             cx = int(M['m10'] / M['m00'])
             cy = int(M['m01'] / M['m00'])
 
             if last_centroid is None:
                 last_centroid = [cx, cy]
-                return cx, cy, contour_width_target, frame_color
+                return cx, cy, contour_width_target, frame_color, x, y, x+w, y+h
 
             sx = int(lerp(last_centroid[0], cx, 0.5))
             sy = int(lerp(last_centroid[1], cy, 0.5))
             last_centroid = [sx, sy]
             cx_target     = last_centroid[0]
             cy_target     = last_centroid[1]
+            contour_width_target = contour_width
 
-    return cx_target, cy_target, contour_width_target, frame_color
+    return (cx_target, cy_target, contour_width_target, frame_color, x, y, x+w, y+h)
 
 
 def draw_overlay(frame, cx, cy):
@@ -109,18 +128,24 @@ if __name__ == "__main__":
         if not ret:
             break
 
-        cx, cy, width, frame_color = detection(frame)
-        frame = draw_overlay(frame, cx, cy)
+        get_detection = detection(frame)
+        frame = draw_overlay(frame, get_detection[0], get_detection[1])
 
-        if cx != -1:
-            dx, dy = pixel_to_mm(cx, cy)
-            cv2.putText(frame, f"cx={cx} cy={cy}", (10, 25),
+        if get_detection[0] != -1:
+            dx, dy = pixel_to_mm(get_detection[0], get_detection[1])
+            cv2.rectangle(frame, (get_detection[4], get_detection[5]), (get_detection[6], get_detection[7]), (0, 255, 0), 2)
+            cv2.putText(frame, f"cx={get_detection[0]} cy={get_detection[1]}", (10, 25),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
             cv2.putText(frame, f"dx={dx:.2f}mm dy={dy:.2f}mm", (10, 50),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
+        else:
+            cv2.putText(frame, f"cx=0 cy=0", (10, 25),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            cv2.putText(frame, f"dx=0mm dy=0mm", (10, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
 
         cv2.imshow("Vision", frame)
-        cv2.imshow("Masked", frame_color)
+        # cv2.imshow("Masked", frame_color)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
